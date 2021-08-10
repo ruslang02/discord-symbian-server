@@ -1,0 +1,17 @@
+{
+  "name": "discord-symbian-server",
+  "version": "1.0.0",
+  "description": "",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {},
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "ws": "^8.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^16.4.13",
+    "@types/ws": "^7.4.7"
+  }
+}
