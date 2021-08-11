@@ -24,7 +24,7 @@ class Client {
      */
     socket;
     /**
-     * @type {WebSocket}
+     * @type {WebSocket | undefined}
      */
     websocket;
 
@@ -49,16 +49,19 @@ class Client {
             buffer = Buffer.concat([buffer, remaining]);
         });
 
+        this.socket.on("error", this.handleClose);
         this.socket.on("close", this.handleClose);
 
         console.log("Client connected.");
         this.sendObject({
-            pr: 0
+            op: -1,
+            t: "GATEWAY_HELLO"
         });
     }
 
     handleClose = () => {
         console.log("Client disconnected.");
+        this.websocket?.close();
     }
 
     /**
@@ -69,7 +72,7 @@ class Client {
         console.log("Received a message from client:", message);
         try {
             const parsed = JSON.parse(message);
-            if ("pr" in parsed) {
+            if ("op" in parsed && parsed.op === -1) {
                 this.handleProxyMessage(parsed);
             } else {
                 this.websocket?.send(message);
@@ -84,13 +87,13 @@ class Client {
      * @param {{ pr: number }} parsed
      */
     handleProxyMessage = (parsed) => {
-        switch (parsed.pr) {
+        switch (parsed.t) {
             case 0:
                 break;
-            case 1:
+            case "GATEWAY_CONNECT":
                 this.connectGateway();
                 break;
-            case 2:
+            case "GATEWAY_DISCONNECT":
                 this.websocket?.close();
                 break;
             default:
@@ -99,11 +102,24 @@ class Client {
 
     connectGateway = () => {
         this.websocket = new WebSocket("wss://gateway.discord.gg/?v=9&encoding=json")
-            .on("error", console.error)
+            .on("error", e => {
+                console.error(e);
+                this.sendObject({
+                    op: -1,
+                    t: "GATEWAY_DISCONNECT",
+                    d: {
+                        message: e.message.toString()
+                    }
+                });
+                this.socket.destroy();
+            })
             .on("close", (code, reason) => {
                 this.sendObject({
-                    pr: 2,
-                    message: reason.toString()
+                    op: -1,
+                    t: "GATEWAY_DISCONNECT",
+                    d: {
+                        message: reason.toString()
+                    }
                 });
                 this.socket.destroy();
             })
