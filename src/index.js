@@ -27,6 +27,10 @@ class Client {
      * @type {WebSocket | undefined}
      */
     websocket;
+    /**
+     * @type {string[]}
+     */
+    supportedEvents = [];
 
     constructor(socket) {
         this.socket = socket;
@@ -91,10 +95,17 @@ class Client {
             case 0:
                 break;
             case "GATEWAY_CONNECT":
+                if (parsed.d) {
+                    this.supportedEvents = parsed.d;
+                    console.log(this.supportedEvents);
+                }
                 this.connectGateway();
                 break;
             case "GATEWAY_DISCONNECT":
                 this.websocket?.close();
+                break;
+            case "GATEWAY_UPDATE_SUPPORTED_EVENTS":
+                this.supportedEvents = parsed.d;
                 break;
             default:
         }
@@ -124,16 +135,21 @@ class Client {
                 this.socket.destroy();
             })
             .on("unexpected-response", console.error)
-            .on("message", this.sendMessage);
+            .on("message", json => {
+                const t = json.toString().match(/"t":"([A-Z_]+)".+/)?.[1];
+
+                if (!t || !this.supportedEvents.length || this.supportedEvents.includes(t))
+                    this.sendMessage(json.toString());
+            });
     }
 
     /**
      * Sends the message to the TCP client.
-     * @param {Buffer|string} buffer
+     * @param {string} str
      */
-    sendMessage = (buffer) => {
-        console.log("Sending to client: " + buffer.toString());
-        this.socket.write(buffer.toString() + "\n");
+    sendMessage = (str) => {
+        console.log("Sending to client: " + str);
+        this.socket.write(str + "\n");
     }
 
     sendObject = (object) => {
