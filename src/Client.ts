@@ -1,50 +1,25 @@
-import { Server, TLSSocket } from "tls";
-import { readFileSync } from "fs";
-import { Duplex } from "stream";
+import { TLSSocket } from "tls";
 import WebSocket from "ws";
+import { ConnectData } from "./dto/ConnectData";
+import { Payload } from "./dto/Payload";
+import { UpdateSupportedEventsData } from "./dto/UpdateSupportedEventsData";
 
-const { PORT = 8080 } = process.env;
+const NEW_LINE = "\n".charCodeAt(0);
 
-const server = new Server({
-    key: readFileSync("ssl/privkey.pem"),
-    cert: readFileSync("ssl/cert.pem"),
-    dhparam: readFileSync("ssl/ssl-dhparams.pem"),
-    ciphers: "DHE-RSA-AES256-SHA",
-    secureProtocol: "TLS_method"
-}).listen(PORT);
+export class Client {
+    private websocket?: WebSocket;
+    private supportedEvents: string[] = [];
 
-const newLine = "\n".charCodeAt(0);
+    constructor(
+        private socket: TLSSocket
+    ) {}
 
-server.on("listening", () => console.log(`TCP server is listening on port ${PORT}.`));
-server.on("secureConnection", socket => new Client(socket).handleConnection());
-
-class Client {
-    /**
-     * @type {TLSSocket & Duplex}
-     */
-    socket;
-    /**
-     * @type {WebSocket | undefined}
-     */
-    websocket;
-    /**
-     * @type {string[]}
-     */
-    supportedEvents = [];
-
-    constructor(socket) {
-        this.socket = socket;
-    }
-
-    /**
-     * Handles a client connection to the TCP server.
-     */
-    handleConnection = () => {
+    private createMessageReceiver = () => {
         let buffer = Buffer.alloc(0);
         this.socket.on("data", (data) => {
             let remaining = Buffer.from(data);
             let index = -1;
-            while ((index = remaining.indexOf(newLine)) !== -1) {
+            while ((index = remaining.indexOf(NEW_LINE)) !== -1) {
                 buffer = Buffer.concat([buffer, remaining.slice(0, index)]);
                 remaining = remaining.slice(index + 1);
                 this.handleMessage(buffer.toString());
@@ -52,6 +27,13 @@ class Client {
             };
             buffer = Buffer.concat([buffer, remaining]);
         });
+    }
+
+    /**
+     * Handles a client connection to the TCP server.
+     */
+    public handleConnection = () => {
+        this.createMessageReceiver();
 
         this.socket.on("error", this.handleClose);
         this.socket.on("close", this.handleClose);
@@ -63,16 +45,12 @@ class Client {
         });
     }
 
-    handleClose = () => {
+    private handleClose = () => {
         console.log("Client disconnected.");
         this.websocket?.close();
     }
 
-    /**
-     * Handles processing of a message from the client.
-     * @param {string} message
-     */
-    handleMessage = (message) => {
+    private handleMessage = (message: string) => {
         console.log("Received a message from client:", message);
         try {
             const parsed = JSON.parse(message);
@@ -86,33 +64,24 @@ class Client {
         }
     }
 
-    /**
-     * Handles processing of a message for the proxy service.
-     * @param {{ pr: number }} parsed
-     */
-    handleProxyMessage = (parsed) => {
-        switch (parsed.t) {
-            case 0:
-                break;
+    private handleProxyMessage = (payload: Payload) => {
+        switch (payload.t) {
             case "GATEWAY_CONNECT":
-                if (parsed.d) {
-                    this.supportedEvents = parsed.d;
-                    console.log(this.supportedEvents);
-                }
-                this.connectGateway();
+                this.supportedEvents = (payload.d as ConnectData).supported_events;
+                this.connectGateway((payload.d as ConnectData).url);
                 break;
             case "GATEWAY_DISCONNECT":
                 this.websocket?.close();
                 break;
             case "GATEWAY_UPDATE_SUPPORTED_EVENTS":
-                this.supportedEvents = parsed.d;
+                this.supportedEvents = (payload.d as UpdateSupportedEventsData).supported_events;
                 break;
             default:
         }
     }
 
-    connectGateway = () => {
-        this.websocket = new WebSocket("wss://gateway.discord.gg/?v=9&encoding=json")
+    private connectGateway = (gatewayUrl: string) => {
+        this.websocket = new WebSocket(gatewayUrl)
             .on("error", e => {
                 console.error(e);
                 this.sendObject({
@@ -123,6 +92,7 @@ class Client {
                     }
                 });
                 this.socket.destroy();
+
             })
             .on("close", (code, reason) => {
                 this.sendObject({
@@ -143,16 +113,12 @@ class Client {
             });
     }
 
-    /**
-     * Sends the message to the TCP client.
-     * @param {string} str
-     */
-    sendMessage = (str) => {
-        console.log("Sending to client: " + str);
-        this.socket.write(str + "\n");
+    sendMessage = (data: string) => {
+        console.log("Sending to client: " + data);
+        this.socket.write(data + "\n");
     }
 
-    sendObject = (object) => {
+    sendObject = (object: any) => {
         this.sendMessage(JSON.stringify(object));
     }
 }
